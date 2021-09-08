@@ -2,17 +2,19 @@
 import pygame
 from pygame.locals import *
 import sys, math
-from objects import Point, Stick, Game
 
 
 # Vars
+SCREEN_WIDTH = 1792
+SCREEN_HEIGHT = 1075
+
 ACC_X = 0 # global x acceleration
 ACC_Y = 500 # global y acceleration
 
 USE_STRESS = True
 MAX_STRESS = 4.5
 
-SNAP_SIZE = 25 # size (in pixels) of the snapping grid
+GRID_SIZE = 25 # size (in pixels) of the snapping grid
 SNAP_RADIUS = 20 # within this distance, a stick will snap to the nearest point while being created
 DELETE_RADIUS = 10
 
@@ -28,17 +30,87 @@ locked_point_color = (255, 75, 75)
 deleting_color = (255, 105, 105)
 
 
+# Classes
+class Point():
+    def __init__(self, pos, locked=False, is_new=True): # pos = (x, y); locked = bool
+        self.pos = pos
+        self.prev_pos = pos
+        self.locked = locked
+        self.is_new = is_new # this point is currently being created; don't apply physics to it
+        self.sticks = []
+
+class Stick():
+    def __init__(self, pointA, pointB):
+        self.pointA = pointA
+        self.pointB = pointB
+        self.length = distance(self.pointA.pos, self.pointB.pos)
+        pointA.sticks.append(self)
+        pointB.sticks.append(self)
+    
+    def get_center(self):
+        return ((self.pointA.pos[0]+self.pointB.pos[0])/2, (self.pointA.pos[1]+self.pointB.pos[1])/2)
+    
+    def get_stress(self):
+        return distance(self.pointA.pos, self.pointB.pos)-self.length
+    
+    def get_stress_color(self): # returns an RGB color based on the current stress of the stick
+        return (min(max(30+self.get_stress()*(255-30)/MAX_STRESS, 0), 255), min(max(120-self.get_stress()*8, 0), 255), 50)
+
+    def get_points(self): # return connected points as a list
+        return [self.pointA, self.pointB]
+
+
+class Game():
+    def __init__(self, points=[], sticks=[]):
+        self.points = points
+        self.sticks = sticks
+
+    def update(self, d_time): # d_time = time since last frame (IN SECONDS)
+        d_time = max(d_time, 0.01)
+        for p in self.points:
+            if not p.locked and not p.is_new:
+                pos_before_update = p.pos
+                p.pos = (2*p.pos[0]-p.prev_pos[0], 2*p.pos[1]-p.prev_pos[1])
+                p.pos = (p.pos[0]+ACC_X*(d_time**2), p.pos[1]+ACC_Y*(d_time**2))
+                p.prev_pos = pos_before_update
+        
+        for stick in self.sticks:
+            if USE_STRESS and stick.get_stress() > MAX_STRESS:
+                self.sticks.remove(stick)
+            stick_center = stick.get_center()
+            dist = distance(stick.pointA.pos, stick.pointB.pos)
+            stick_dir = ((stick.pointA.pos[0]-stick.pointB.pos[0])/dist, (stick.pointA.pos[1]-stick.pointB.pos[1])/dist)
+            if not stick.pointA.locked:
+                stick.pointA.pos = (stick_center[0]+stick_dir[0]*stick.length/2, stick_center[1]+stick_dir[1]*stick.length/2)
+            if not stick.pointB.locked:
+                stick.pointB.pos = (stick_center[0]-stick_dir[0]*stick.length/2, stick_center[1]-stick_dir[1]*stick.length/2)
+
+    def create_fabric(self, pos, width, height, space_between):
+        grid = [[Point((pos[0]+x*space_between, pos[1]+y*space_between), False, False) for x in range(width)] for y in range(height)]
+        for row in grid:
+            for point in row:
+                self.points.append(point)
+        for y in range(height):
+            for x in range(width-1):
+                self.sticks.append(Stick(grid[y][x], grid[y][x+1]))
+        for y in range(height-1):
+            for x in range(width):
+                self.sticks.append(Stick(grid[y][x], grid[y+1][x]))
+
+
 def distance(pos1, pos2):
     return math.hypot(pos1[0]-pos2[0], pos1[1]-pos2[1])
 
 def main():
     pygame.init()
-    screen = pygame.display.set_mode((1792,1075))
+    screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
     pygame.display.set_caption("Ropes")
     clock = pygame.time.Clock()
     game = Game()
 
-    paused = False
+    game.create_fabric((500, 100), 37, 25, 20)
+
+    paused = True
     use_snap = False
     while True:
         clock.tick(60) # maintain framerate
@@ -46,7 +118,7 @@ def main():
         mouse_pos = pygame.mouse.get_pos() # get mouse position
         place_pos = mouse_pos
         if use_snap:
-            place_pos = (round(mouse_pos[0]/SNAP_SIZE)*SNAP_SIZE, round(mouse_pos[1]/SNAP_SIZE)*SNAP_SIZE)
+            place_pos = (round(mouse_pos[0]/GRID_SIZE)*GRID_SIZE, round(mouse_pos[1]/GRID_SIZE)*GRID_SIZE)
         
         # if there is a point nearby, start drawing at that point; otherwise, create a new point
         nearest_point = None
@@ -74,18 +146,19 @@ def main():
                 if nearest_point:
                     pointA = nearest_point
                 else:
-                    pointA = Point(place_pos, False)
+                    pointA = Point(place_pos)
                     game.points.append(pointA)
 
             elif event.type == MOUSEBUTTONUP and event.button == 1: # set pointB and create sticks between points
                 if nearest_point:
                     pointB = nearest_point
                 else:
-                    pointB = Point(place_pos, False)
+                    pointB = Point(place_pos)
                     game.points.append(pointB)
                 
                 if pointA != pointB:
-                    game.sticks.append(Stick(pointA, pointB, distance(pointA.pos, pointB.pos)))
+                    if not any([pointB in stick.get_points() for stick in pointA.sticks]):
+                        game.sticks.append(Stick(pointA, pointB))
                 elif not pointA.is_new:
                     pointA.locked = not pointA.locked
                 
@@ -95,7 +168,7 @@ def main():
         if pygame.mouse.get_pressed()[0]: # left mouse is being held, preview stick placement
             drawing = True
 
-        if pygame.mouse.get_pressed()[2]: # if right mouse button is being held, remove any object hovered near
+        if not drawing and pygame.mouse.get_pressed()[2]: # if right mouse button is being held, remove any object hovered near
             deleting = True
             if nearest_point:
                 game.points.remove(nearest_point)
@@ -105,11 +178,11 @@ def main():
                     except Exception:
                         pass
             for stick in game.sticks:
-                if distance(mouse_pos, stick.get_center()) < DELETE_RADIUS + STICK_WIDTH:
+                if distance(mouse_pos, stick.get_center()) < DELETE_RADIUS+STICK_WIDTH:
                     game.sticks.remove(stick)
         
         for point in game.points:
-            if point.pos[1] > 1800: # point is far below screen; delete it
+            if point.pos[1] > SCREEN_WIDTH+SCREEN_HEIGHT: # point is far below screen; delete it
                 game.points.remove(point)
                 for stick in point.sticks:
                     try:
@@ -122,15 +195,14 @@ def main():
 
         # Visuals
         screen.fill(bg_color)
-        
-        if drawing:
-            pygame.draw.line(screen, point_preview_color, pointA.pos, place_pos, STICK_WIDTH)
-        
+
         if deleting:
             pygame.draw.circle(screen, deleting_color, mouse_pos, DELETE_RADIUS)
 
-        if not deleting: 
-            pygame.draw.circle(screen, point_preview_color, place_pos, POINT_RADIUS) # point placing overlay
+        if drawing:
+            pygame.draw.line(screen, point_preview_color, pointA.pos, nearest_point.pos if nearest_point else place_pos, STICK_WIDTH)
+        
+        pygame.draw.circle(screen, point_preview_color, nearest_point.pos if nearest_point else place_pos, POINT_RADIUS) # mouse cursor thingy
 
         for stick in game.sticks:
             pygame.draw.line(screen, stick.get_stress_color(), stick.pointA.pos, stick.pointB.pos, STICK_WIDTH)
@@ -147,6 +219,8 @@ def main():
             pygame.draw.line(screen, white, (35, 60), (35, 90), 4)
         
         pygame.display.flip()
+
+        print(f"FPS: {int(clock.get_fps())}")
         
 
 if __name__ == "__main__":
