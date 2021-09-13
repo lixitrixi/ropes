@@ -5,13 +5,13 @@ import sys, math
 
 
 # Vars
-SCREEN_WIDTH = 1792
-SCREEN_HEIGHT = 1075
+SCREEN_WIDTH = 500
+SCREEN_HEIGHT = 500
 
 ACC_X = 0 # global x acceleration
 ACC_Y = 500 # global y acceleration
 
-USE_STRESS = True
+USE_STRESS = False
 MAX_STRESS = 4.5
 
 GRID_SIZE = 25 # size (in pixels) of the snapping grid
@@ -73,6 +73,26 @@ class Game():
                 p.pos = (2*p.pos[0]-p.prev_pos[0], 2*p.pos[1]-p.prev_pos[1])
                 p.pos = (p.pos[0]+ACC_X*(d_time**2), p.pos[1]+ACC_Y*(d_time**2))
                 p.prev_pos = pos_before_update
+
+                if p.pos[0] > SCREEN_WIDTH-POINT_RADIUS: # bounce off right
+                    excess = p.pos[0]-(SCREEN_WIDTH-POINT_RADIUS)
+                    p.prev_pos = (p.pos[0]+0.5*(p.pos[0]-p.prev_pos[0])-excess, p.prev_pos[1])
+                    p.pos = (SCREEN_WIDTH-POINT_RADIUS, p.pos[1])
+
+                if p.pos[0] < POINT_RADIUS: # bounce off left
+                    excess = p.pos[0]-POINT_RADIUS
+                    p.prev_pos = (p.pos[0]+0.5*(p.pos[0]-p.prev_pos[0])-excess, p.prev_pos[1])
+                    p.pos = (POINT_RADIUS, p.pos[1])
+
+                if p.pos[1] > SCREEN_HEIGHT-POINT_RADIUS: # bounce off bottom
+                    excess = p.pos[1]-(SCREEN_HEIGHT-POINT_RADIUS)
+                    p.prev_pos = (p.prev_pos[0], p.pos[1]+0.5*(p.pos[1]-p.prev_pos[1])-excess)
+                    p.pos = (p.pos[0], SCREEN_HEIGHT-POINT_RADIUS)
+
+                if p.pos[1] < POINT_RADIUS: # bounce off top
+                    excess = p.pos[1]-POINT_RADIUS
+                    p.prev_pos = (p.prev_pos[0], p.pos[1]+0.5*(p.pos[1]-p.prev_pos[1])-excess)
+                    p.pos = (p.pos[0], POINT_RADIUS)
         
         for stick in self.sticks:
             if USE_STRESS and stick.get_stress() > MAX_STRESS:
@@ -99,7 +119,7 @@ class Game():
 
 
 def distance(pos1, pos2):
-    return math.hypot(pos1[0]-pos2[0], pos1[1]-pos2[1])
+    return max(math.hypot(pos1[0]-pos2[0], pos1[1]-pos2[1]), 0.001)
 
 def main():
     pygame.init()
@@ -108,9 +128,9 @@ def main():
     clock = pygame.time.Clock()
     game = Game()
 
-    game.create_fabric((500, 100), 37, 25, 20)
+    # game.create_fabric((500, 100), 37, 25, 20)
 
-    paused = True
+    paused = False
     use_snap = False
     while True:
         clock.tick(60) # maintain framerate
